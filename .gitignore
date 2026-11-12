@@ -73,3 +73,15 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# IDE / 本地工具（不上传）
+.idea/
+.pi/
+.vscode/
+*.slnx
+
+# 本地/系统杂项
+*.VC.db
+*.VC.opendb
+.DS_Store
+Thumbs.db

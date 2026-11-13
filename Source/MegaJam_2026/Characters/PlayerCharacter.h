@@ -10,7 +10,6 @@
 class UInputComponent;
 class USkeletalMeshComponent;
 class UInputAction;
-class UUserWidget;
 struct FInputActionValue;
 
 UCLASS()
@@ -31,8 +30,8 @@ class MEGAJAM_2026_API APlayerCharacter : public ACharacter
 	TObjectPtr<USpringArmComponent> DebugSpringArm;
 
 public:
-	virtual void SwitchToFirstCam();
-	virtual void SwitchToThirdCam();
+	/*virtual void SwitchToFirstCam();
+	virtual void SwitchToThirdCam();*/
 
 	virtual void BeginPlay() override;
 
@@ -50,19 +49,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Tools")
 	float PlayerDeathHeight = 0.f;
 
-public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category="DebugUI")
-	TSubclassOf<class UUserWidget> DebugUI;
-
-	UPROPERTY()
-	TObjectPtr<UUserWidget> DebugWidgetInstance;
-
 protected:
 	void MoveInput(const FInputActionValue& Value);
 	void MoveInputReleased();
 	void ClearSourceMovementInput();
 	void MouseLookInput(const FInputActionValue& Value);
-	void DebugMenuCalled(const FInputActionValue& Value);
 
 protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = true))
@@ -78,8 +69,8 @@ protected:
 	TObjectPtr<UInputAction> LookAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = true))
-	TObjectPtr<UInputAction> DebugAction;
-
+	TObjectPtr<UInputAction> CrouchAction;
+	
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void Domove(float Right, float Left);
 
@@ -92,6 +83,12 @@ protected:
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
 
+	UFUNCTION(BlueprintCallable, Category="Input")
+	virtual void DoCrouch();
+	
+	UFUNCTION(BlueprintCallable, Category="Input")
+	virtual void DoUnCrouch();
+	
 	virtual void ShowVelocity();
 
 protected:

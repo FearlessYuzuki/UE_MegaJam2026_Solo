@@ -1,6 +1,5 @@
 #include "MegaJam_2026/Characters/PlayerCharacter.h"
 #include "EnhancedInputComponent.h"
-#include "Blueprint/UserWidget.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -24,8 +23,8 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	FirstPersonSpringArm->SetupAttachment(RootComponent);
 	FirstPersonCamera->SetupAttachment(FirstPersonSpringArm, USpringArmComponent::SocketName);
 
-	FirstPersonSpringArm->TargetArmLength = 100.f;
-	FirstPersonCamera->FieldOfView = 110.f;
+	FirstPersonSpringArm->TargetArmLength = 111.f;
+	FirstPersonCamera->FieldOfView = 103.f;
 	FirstPersonSpringArm->bUsePawnControlRotation = false;
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	FirstPersonSpringArm->SocketOffset = FVector(155.0f, 0.0f, 54.0f);
@@ -48,6 +47,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 		FirstPersonCamera->Activate();
 		DebugCamera->Deactivate();
 	}
+	
 }
 
 void APlayerCharacter::BeginPlay()
@@ -87,6 +87,11 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		                                   &APlayerCharacter::MoveInputReleased);
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Canceled, this,
 		                                   &APlayerCharacter::MoveInputReleased);
+		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this,&APlayerCharacter::DoCrouch);
+		
+		EnhancedInputComponent->BindAction(CrouchAction,ETriggerEvent::Completed,this,&APlayerCharacter::DoUnCrouch);
+		
+		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Canceled, this,&APlayerCharacter::DoUnCrouch);
 
 		if (AutoBhopFunction)
 		{
@@ -102,9 +107,6 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this,
 			                                   &APlayerCharacter::DoJumpEnd);
 		}
-
-		EnhancedInputComponent->BindAction(DebugAction, ETriggerEvent::Triggered, this,
-		                                   &APlayerCharacter::DebugMenuCalled);
 	}
 }
 
@@ -147,45 +149,6 @@ void APlayerCharacter::MouseLookInput(const FInputActionValue& Value)
 	DoLook(V.X, V.Y);
 }
 
-void APlayerCharacter::DebugMenuCalled(const FInputActionValue& Value)
-{
-	TObjectPtr<APlayerController> roller = GetController<APlayerController>();
-
-	if (!roller)
-	{
-		return;
-	}
-
-	if (DebugWidgetInstance && DebugWidgetInstance->IsInViewport())
-	{
-		DebugWidgetInstance->RemoveFromParent();
-		roller->bShowMouseCursor = false;
-		roller->SetInputMode(FInputModeGameOnly());
-		ClearSourceMovementInput();
-	}
-
-	if (bDevMode != true)
-	{
-		GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Emerald, FString(TEXT("Sv_DevMode is not true")));
-		return;
-	}
-	else
-	{
-		GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Cyan, FString(TEXT("Sv_DevMode is true")));
-		if (!DebugWidgetInstance)
-		{
-			DebugWidgetInstance = CreateWidget<UUserWidget>(roller, DebugUI);
-		}
-		if (DebugWidgetInstance)
-		{
-			DebugWidgetInstance->AddToViewport();
-			roller->SetShowMouseCursor(true);
-			roller->SetInputMode(FInputModeUIOnly());
-			ClearSourceMovementInput();
-		}
-	}
-}
-
 void APlayerCharacter::Domove(float right, float left)
 {
 	if (GetController())
@@ -203,7 +166,7 @@ void APlayerCharacter::DoLook(float Yaw, float Pitch)
 		AddControllerPitchInput(Pitch);
 	}
 }
-
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   
 void APlayerCharacter::DoJumpStart()
 {
 	Jump();
@@ -212,6 +175,16 @@ void APlayerCharacter::DoJumpStart()
 void APlayerCharacter::DoJumpEnd()
 {
 	StopJumping();
+}
+
+void APlayerCharacter::DoCrouch()
+{
+	Crouch();
+}
+
+void APlayerCharacter::DoUnCrouch()
+{
+	UnCrouch();
 }
 
 void APlayerCharacter::ShowVelocity()
@@ -239,6 +212,7 @@ void APlayerCharacter::ShowVelocity()
 		                                Velocity.Size2D()));
 }
 
+/*
 void APlayerCharacter::SwitchToFirstCam()
 {
 	if (FirstPersonCamera && DebugCamera)
@@ -247,15 +221,9 @@ void APlayerCharacter::SwitchToFirstCam()
 		DebugCamera->Deactivate();
 	}
 }
+*/
 
-void APlayerCharacter::SwitchToThirdCam()
-{
-	if (FirstPersonCamera && DebugCamera)
-	{
-		FirstPersonCamera->Deactivate();
-		DebugCamera->Activate();
-	}
-}
+
 
 void APlayerCharacter::Respawn()
 {
@@ -288,3 +256,4 @@ void APlayerCharacter::SetSpawnPoint(AActor* InPoint)
 		                                                 *InPoint->GetActorLocation().ToString()));
 	}
 }
+

@@ -1,0 +1,22 @@
+# ── 换行符：仓库索引与工作区统一 LF，不受 core.autocrlf 影响 ──
+* text=auto eol=lf
+.gitattributes text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ── Unreal 二进制资产（不做任何文本转换，也不做 diff）──
+*.uasset binary
+*.umap binary
+*.ubulk binary
+*.uexp binary
+*.uptnl binary
+*.udic binary
+*.upk binary
+*.pak binary
+*.sav binary
+*.png binary
+*.jpg binary
+*.wav binary
+*.fbx binary
+*.tga binary

@@ -11,6 +11,7 @@
 #include "Engine/World.h"
 #include "MegaJam_2026/Characters/SourceCharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "MegaJam_2026/Rendering/FogViewExtension.h"
 
 APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USourceCharacterMovementComponent>(
@@ -28,6 +29,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	CenterFirstPersonCamera();
 	FirstPersonCamera->FieldOfView = 118.0f;
 	FirstPersonSpringArm->bUsePawnControlRotation = false;
+	FirstPersonSpringArm->AddTickPrerequisiteActor(this);
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
 	DebugCamera = CreateDefaultSubobject<UCameraComponent>(FName("DebugCamCamera"));
@@ -55,6 +57,20 @@ void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	CenterFirstPersonCamera();
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		RegisterFogViewExtension();
+	}
+	if (FirstPersonCamera)
+	{
+		FirstPersonCamera->PostProcessBlendWeight = 1.0f;
+		FirstPersonCamera->PostProcessSettings.bOverride_MotionBlurAmount = true;
+		FirstPersonCamera->PostProcessSettings.MotionBlurAmount = 0.15f;
+		FirstPersonCamera->PostProcessSettings.bOverride_MotionBlurMax = true;
+		FirstPersonCamera->PostProcessSettings.MotionBlurMax = 1.0f;
+		FirstPersonCamera->PostProcessSettings.bOverride_MotionBlurTargetFPS = true;
+		FirstPersonCamera->PostProcessSettings.MotionBlurTargetFPS = 60;
+	}
 }
 
 void APlayerCharacter::CenterFirstPersonCamera()
@@ -71,8 +87,51 @@ void APlayerCharacter::CenterFirstPersonCamera()
 	FirstPersonCamera->SetRelativeLocation(FVector::ZeroVector);
 }
 
+void APlayerCharacter::BeginCrouchCameraTransition(const FVector& CapsuleLocationCompensation)
+{
+	if (!FirstPersonSpringArm || bIsCameraFlipping || CrouchCameraTransitionDuration <= 0.0f)
+	{
+		ResetCrouchCamera();
+		return;
+	}
+
+	FirstPersonSpringArm->TargetOffset += CapsuleLocationCompensation;
+	CrouchCameraStartOffset = FirstPersonSpringArm->TargetOffset;
+	CrouchCameraElapsed = 0.0f;
+}
+
+void APlayerCharacter::UpdateCrouchCamera(float DeltaTime)
+{
+	if (!FirstPersonSpringArm || CrouchCameraStartOffset.IsNearlyZero())
+	{
+		return;
+	}
+
+	CrouchCameraElapsed += DeltaTime;
+	const float Alpha = CrouchCameraTransitionDuration > 0.0f
+		? FMath::Clamp(CrouchCameraElapsed / CrouchCameraTransitionDuration, 0.0f, 1.0f)
+		: 1.0f;
+	const float SmoothAlpha = Alpha * Alpha * (3.0f - 2.0f * Alpha);
+	FirstPersonSpringArm->TargetOffset = FMath::Lerp(CrouchCameraStartOffset, FVector::ZeroVector, SmoothAlpha);
+	if (Alpha >= 1.0f)
+	{
+		ResetCrouchCamera();
+	}
+}
+
+void APlayerCharacter::ResetCrouchCamera()
+{
+	CrouchCameraStartOffset = FVector::ZeroVector;
+	CrouchCameraElapsed = 0.0f;
+	if (FirstPersonSpringArm)
+	{
+		FirstPersonSpringArm->TargetOffset = FVector::ZeroVector;
+	}
+}
+
 void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	CancelMantle();
 	SetCameraFlipInputLocked(false);
 	Super::EndPlay(EndPlayReason);
 }
@@ -81,6 +140,8 @@ void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	UpdateCameraAngle(DeltaTime);
+	UpdateCrouchCamera(DeltaTime);
+	UpdateJumpInput(DeltaTime);
 	if (SpeedShowingSwitch == true)
 	{
 		ShowVelocity();
@@ -115,22 +176,14 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EnhancedInputComponent->BindAction(CrouchAction,ETriggerEvent::Completed,this,&APlayerCharacter::DoUnCrouch);
 		
 		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Canceled, this,&APlayerCharacter::DoUnCrouch);
-		
-		
-		if (AutoBhopFunction)
-		{
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this,
-			                                   &APlayerCharacter::DoJumpStart);
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this,
-			                                   &APlayerCharacter::DoJumpEnd);
-		}
-		if (!AutoBhopFunction)
-		{
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this,
-			                                   &APlayerCharacter::DoJumpStart);
-			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this,
-			                                   &APlayerCharacter::DoJumpEnd);
-		}
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this,
+			&APlayerCharacter::DoJumpStart);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this,
+			&APlayerCharacter::DoJumpHeld);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this,
+			&APlayerCharacter::DoJumpEnd);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Canceled, this,
+			&APlayerCharacter::DoJumpEnd);
 	}
 }
 
@@ -153,6 +206,9 @@ void APlayerCharacter::SetCameraAngle()
 		return;
 	}
 
+	CancelMantle();
+	ResetJumpInputState();
+	ResetCrouchCamera();
 	SetCameraFlipInputLocked(true);
 	if (AController* InputController = GetController())
 	{
@@ -228,7 +284,7 @@ void APlayerCharacter::UpdateCameraAngle(float DeltaTime)
 
 void APlayerCharacter::MoveInput(const FInputActionValue& Value)
 {
-	if (bIsCameraFlipping || IsMoveInputIgnored())
+	if (bIsCameraFlipping || IsMantling() || IsMoveInputIgnored())
 	{
 		ClearSourceMovementInput();
 		return;
@@ -273,7 +329,7 @@ void APlayerCharacter::MouseLookInput(const FInputActionValue& Value)
 
 void APlayerCharacter::Domove(float right, float left)
 {
-	if (!bIsCameraFlipping && GetController())
+	if (!bIsCameraFlipping && !IsMantling() && !IsMoveInputIgnored() && GetController())
 	{
 		AddMovementInput(GetActorRightVector(), right * GetCameraInputDirection());
 		AddMovementInput(GetActorForwardVector(), left);
@@ -292,22 +348,36 @@ void APlayerCharacter::DoLook(float Yaw, float Pitch)
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 void APlayerCharacter::DoJumpStart()
 {
-	if (bIsCameraFlipping || IsMoveInputIgnored())
+	if (bIsCameraFlipping || IsMantling() || IsMoveInputIgnored())
 	{
 		return;
 	}
 
+	bJumpInputHeld = true;
+	bMantleConsumedForHold = false;
+	JumpHeldTime = 0.0f;
 	Jump();
+}
+
+void APlayerCharacter::DoJumpHeld()
+{
+	if (AutoBhopFunction && bJumpInputHeld && !bMantleConsumedForHold
+		&& !bIsCameraFlipping && !IsMantling() && !IsMoveInputIgnored()
+		&& GetCharacterMovement()->IsMovingOnGround())
+	{
+		Jump();
+	}
 }
 
 void APlayerCharacter::DoJumpEnd()
 {
 	StopJumping();
+	ResetJumpInputState();
 }
 
 void APlayerCharacter::DoCrouch()
 {
-	if (bIsCameraFlipping || IsMoveInputIgnored())
+	if (bIsCameraFlipping || IsMantling() || IsMoveInputIgnored())
 	{
 		return;
 	}
@@ -317,7 +387,56 @@ void APlayerCharacter::DoCrouch()
 
 void APlayerCharacter::DoUnCrouch()
 {
-	UnCrouch();
+	if (!IsMantling())
+	{
+		UnCrouch();
+	}
+}
+
+void APlayerCharacter::UpdateJumpInput(float DeltaTime)
+{
+	if (!bJumpInputHeld || bIsCameraFlipping || IsMoveInputIgnored())
+	{
+		return;
+	}
+
+	JumpHeldTime += DeltaTime;
+	if (!bEnableMantling || bMantleConsumedForHold || JumpHeldTime < MantleHoldTime)
+	{
+		return;
+	}
+
+	if (USourceCharacterMovementComponent* SourceMove = Cast<USourceCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		if (SourceMove->TryStartMantle())
+		{
+			bMantleConsumedForHold = true;
+		}
+	}
+}
+
+void APlayerCharacter::ResetJumpInputState()
+{
+	bJumpInputHeld = false;
+	bMantleConsumedForHold = false;
+	JumpHeldTime = 0.0f;
+}
+
+void APlayerCharacter::CancelMantle()
+{
+	if (USourceCharacterMovementComponent* SourceMove = Cast<USourceCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		SourceMove->CancelMantle();
+	}
+}
+
+bool APlayerCharacter::IsMantling() const
+{
+	if (const USourceCharacterMovementComponent* SourceMove = Cast<USourceCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		return SourceMove->IsMantling();
+	}
+	return false;
 }
 
 void APlayerCharacter::ShowVelocity()
@@ -376,6 +495,9 @@ void APlayerCharacter::Respawn()
 	ClearSourceMovementInput();
 	ConsumeMovementInputVector();
 	StopJumping();
+	CancelMantle();
+	ResetJumpInputState();
+	ResetCrouchCamera();
 	CurrentCameraRoll = 0.0f;
 	StartCameraRoll = 0.0f;
 	TargetCameraRoll = 0.0f;

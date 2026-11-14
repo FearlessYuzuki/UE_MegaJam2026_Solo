@@ -45,6 +45,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tools|AutoBhoping")
 	bool AutoBhopFunction = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle")
+	bool bEnableMantling = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float MantleHoldTime = 0.25f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Tools")
 	bool SpeedShowingSwitch = false;
 
@@ -114,8 +121,29 @@ public:
 		meta = (ClampMin = "0.0", Units = "s"))
 	float CameraFlipDuration = 1.5f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Crouch",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float CrouchCameraTransitionDuration = 0.2f;
+
+	void BeginCrouchCameraTransition(const FVector& CapsuleLocationCompensation);
+
 private:
+	void DoJumpHeld();
+	void UpdateJumpInput(float DeltaTime);
+	void ResetJumpInputState();
+	void CancelMantle();
+	bool IsMantling() const;
+
+	bool bJumpInputHeld = false;
+	bool bMantleConsumedForHold = false;
+	float JumpHeldTime = 0.0f;
+
 	void CenterFirstPersonCamera();
+	void UpdateCrouchCamera(float DeltaTime);
+	void ResetCrouchCamera();
+	FVector CrouchCameraStartOffset = FVector::ZeroVector;
+	float CrouchCameraElapsed = 0.0f;
+
 	void UpdateCameraAngle(float DeltaTime);
 	void SetCameraFlipInputLocked(bool bLocked);
 	float GetCameraInputDirection() const;

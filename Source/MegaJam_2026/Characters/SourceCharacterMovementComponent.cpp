@@ -4,12 +4,361 @@
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
 #include "Math/RotationMatrix.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/World.h"
 
 USourceCharacterMovementComponent::USourceCharacterMovementComponent()
 {
 	GroundFriction = 8.f;
 	MaxAcceleration = 600.f;
 	JumpZVelocity = 600.f;
+}
+
+float USourceCharacterMovementComponent::GetMaxSpeed() const
+{
+	return IsMovingOnGround() && IsCrouching() ? FMath::Max(0.0f, MaxCrouchSpeed) : Super::GetMaxSpeed();
+}
+
+void USourceCharacterMovementComponent::Crouch(bool bClientSimulation)
+{
+	if (!HasValidData())
+	{
+		Super::Crouch(bClientSimulation);
+		return;
+	}
+
+	const FVector PreviousLocation = UpdatedComponent->GetComponentLocation();
+	const bool bWasCrouching = IsCrouching();
+	Super::Crouch(bClientSimulation);
+	if (HasValidData() && !bWasCrouching && IsCrouching())
+	{
+		if (APlayerCharacter* Player = Cast<APlayerCharacter>(CharacterOwner))
+		{
+			Player->BeginCrouchCameraTransition(PreviousLocation - UpdatedComponent->GetComponentLocation());
+		}
+	}
+}
+
+void USourceCharacterMovementComponent::UnCrouch(bool bClientSimulation)
+{
+	if (!HasValidData())
+	{
+		Super::UnCrouch(bClientSimulation);
+		return;
+	}
+
+	const FVector PreviousLocation = UpdatedComponent->GetComponentLocation();
+	const bool bWasCrouching = IsCrouching();
+	Super::UnCrouch(bClientSimulation);
+	if (HasValidData() && bWasCrouching && !IsCrouching())
+	{
+		if (APlayerCharacter* Player = Cast<APlayerCharacter>(CharacterOwner))
+		{
+			Player->BeginCrouchCameraTransition(PreviousLocation - UpdatedComponent->GetComponentLocation());
+		}
+	}
+}
+
+bool USourceCharacterMovementComponent::IsMantling() const
+{
+	return MovementMode == MOVE_Custom && CustomMovementMode == MantleMovementMode;
+}
+
+bool USourceCharacterMovementComponent::IsMantlePathClear(const FVector& Start, const FVector& End) const
+{
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MantlePath), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	Capsule->InitSweepCollisionParams(QueryParams, ResponseParams);
+	FHitResult Hit;
+	return !GetWorld()->SweepSingleByChannel(Hit, Start, End, Capsule->GetComponentQuat(),
+		Capsule->GetCollisionObjectType(), Capsule->GetCollisionShape(), QueryParams, ResponseParams);
+}
+
+bool USourceCharacterMovementComponent::FindMantleTarget(FVector& OutTarget, FVector& OutLift,
+	FVector& OutAcross, UPrimitiveComponent*& OutSurface) const
+{
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	const FVector Up = -GetGravityDirection();
+	const FVector Forward = FVector::VectorPlaneProject(
+		CharacterOwner->GetControlRotation().Vector(), Up).GetSafeNormal();
+	if (Forward.IsNearlyZero() || MantleMaxHeight <= 0.0f || MantleWallDistance <= 0.0f)
+	{
+		return false;
+	}
+
+	const FVector Start = UpdatedComponent->GetComponentLocation();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float ProbeRadius = FMath::Min(12.0f, Radius * 0.5f);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MantleTarget), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	Capsule->InitSweepCollisionParams(QueryParams, ResponseParams);
+	const ECollisionChannel Channel = Capsule->GetCollisionObjectType();
+	const float ProbeOffsets[] = {0.0f, -FMath::Min(80.0f, HalfHeight * 0.65f)};
+
+	for (const float ProbeOffset : ProbeOffsets)
+	{
+		const FVector WallStart = Start + Up * ProbeOffset;
+		const FVector WallEnd = WallStart + Forward * (Radius + MantleWallDistance);
+		FHitResult WallHit;
+		const bool bHitWall = GetWorld()->SweepSingleByChannel(WallHit, WallStart, WallEnd,
+			FQuat::Identity, Channel, FCollisionShape::MakeSphere(ProbeRadius), QueryParams, ResponseParams);
+		if (bDrawMantleDebug)
+		{
+			DrawDebugLine(GetWorld(), WallStart, WallEnd, bHitWall ? FColor::Yellow : FColor::Red,
+				false, 0.0f, 0, 2.0f);
+		}
+		if (!bHitWall || !WallHit.IsValidBlockingHit()
+			|| FMath::Abs(FVector::DotProduct(WallHit.ImpactNormal, Up)) > 0.25f
+			|| FVector::DotProduct(Forward, -WallHit.ImpactNormal) < 0.7f)
+		{
+			if (bDrawMantleDebug)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Mantle wall rejected: hit=%d normal=%s"), bHitWall,
+					*WallHit.ImpactNormal.ToCompactString());
+			}
+			continue;
+		}
+
+		UPrimitiveComponent* Surface = WallHit.GetComponent();
+		if (!Surface)
+		{
+			continue;
+		}
+
+		const FVector Inward = FVector::VectorPlaneProject(-WallHit.ImpactNormal, Up).GetSafeNormal();
+		const FVector EdgeStart = WallHit.ImpactPoint + Inward * 3.0f
+			+ Up * (MantleMaxHeight + 10.0f - FVector::DotProduct(WallHit.ImpactPoint - Start, Up));
+		const FVector EdgeEnd = EdgeStart - Up * (MantleMaxHeight + 70.0f);
+		FHitResult EdgeHit;
+		if (!GetWorld()->LineTraceSingleByChannel(EdgeHit, EdgeStart, EdgeEnd, Channel, QueryParams,
+			ResponseParams) || EdgeHit.GetComponent() != Surface || !IsWalkable(EdgeHit))
+		{
+			if (bDrawMantleDebug)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Mantle edge rejected: hit=%d same=%d walkable=%d point=%s"),
+					EdgeHit.IsValidBlockingHit(), EdgeHit.GetComponent() == Surface, IsWalkable(EdgeHit),
+					*EdgeHit.ImpactPoint.ToCompactString());
+			}
+			continue;
+		}
+
+		const float EdgeHeight = FVector::DotProduct(EdgeHit.ImpactPoint - Start, Up);
+		if (EdgeHeight > MantleMaxHeight || EdgeHeight < -60.0f)
+		{
+			continue;
+		}
+
+		const FVector TopStart = EdgeHit.ImpactPoint + Inward * (Radius + 12.0f) + Up * 15.0f;
+		FHitResult TopHit;
+		if (!GetWorld()->LineTraceSingleByChannel(TopHit, TopStart, TopStart - Up * 30.0f,
+			Channel, QueryParams, ResponseParams) || TopHit.GetComponent() != Surface || !IsWalkable(TopHit))
+		{
+			if (bDrawMantleDebug)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Mantle top rejected: hit=%d same=%d walkable=%d point=%s"),
+					TopHit.IsValidBlockingHit(), TopHit.GetComponent() == Surface, IsWalkable(TopHit),
+					*TopHit.ImpactPoint.ToCompactString());
+			}
+			continue;
+		}
+
+		bool bSupported = true;
+		const FVector Side = FVector::CrossProduct(Up, Inward).GetSafeNormal();
+		const FVector SupportOffsets[] = {Side * Radius, -Side * Radius, Inward * Radius, -Inward * Radius};
+		for (const FVector& SupportOffset : SupportOffsets)
+		{
+			FHitResult SupportHit;
+			const FVector SupportStart = TopHit.ImpactPoint + SupportOffset + Up * 15.0f;
+			if (!GetWorld()->LineTraceSingleByChannel(SupportHit, SupportStart, SupportStart - Up * 30.0f,
+				Channel, QueryParams, ResponseParams) || SupportHit.GetComponent() != Surface || !IsWalkable(SupportHit))
+			{
+				bSupported = false;
+				break;
+			}
+		}
+		if (!bSupported)
+		{
+			if (bDrawMantleDebug)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Mantle support rejected"));
+			}
+			continue;
+		}
+
+		const FVector Target = TopHit.ImpactPoint + Up * (HalfHeight + 2.15f);
+		const FVector Lift = Start + Up * (FVector::DotProduct(Target - Start, Up) + 5.0f);
+		const FVector Across = Target + Up * 5.0f;
+		if (GetWorld()->OverlapBlockingTestByChannel(Target, Capsule->GetComponentQuat(), Channel,
+			Capsule->GetCollisionShape(), QueryParams, ResponseParams)
+			|| !IsMantlePathClear(Start, Lift) || !IsMantlePathClear(Lift, Across)
+			|| !IsMantlePathClear(Across, Target))
+		{
+			if (bDrawMantleDebug)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Mantle path rejected: target=%s"), *Target.ToCompactString());
+			}
+			continue;
+		}
+
+		OutTarget = Target;
+		OutLift = Lift;
+		OutAcross = Across;
+		OutSurface = Surface;
+		if (bDrawMantleDebug)
+		{
+			DrawDebugLine(GetWorld(), EdgeStart, EdgeEnd, FColor::Cyan, false, 0.5f, 0, 2.0f);
+			DrawDebugLine(GetWorld(), Start, Lift, FColor::Green, false, 0.5f, 0, 2.0f);
+			DrawDebugLine(GetWorld(), Lift, Across, FColor::Green, false, 0.5f, 0, 2.0f);
+			DrawDebugCapsule(GetWorld(), Target, HalfHeight, Radius, Capsule->GetComponentQuat(),
+				FColor::Green, false, 0.5f);
+		}
+		return true;
+	}
+	return false;
+}
+
+bool USourceCharacterMovementComponent::TryStartMantle()
+{
+	if (bDrawMantleDebug)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Mantle attempt: mode=%d custom=%d falling=%d ground=%d role=%d"),
+			MovementMode.GetValue(), CustomMovementMode, IsFalling(), IsMovingOnGround(),
+			CharacterOwner ? static_cast<int32>(CharacterOwner->GetLocalRole()) : -1);
+	}
+	if (!HasValidData() || IsMantling() || (!IsMovingOnGround() && !IsFalling())
+		|| IsCrouching() || bWantsToCrouch || HasAnimRootMotion() || !UpdatedComponent->IsQueryCollisionEnabled()
+		|| CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
+	{
+		if (bDrawMantleDebug)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Mantle precondition rejected"));
+		}
+		return false;
+	}
+
+	UPrimitiveComponent* Surface = nullptr;
+	if (!FindMantleTarget(MantleTarget, MantleLift, MantleAcross, Surface))
+	{
+		if (bDrawMantleDebug)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Mantle target rejected"));
+		}
+		return false;
+	}
+
+	MantleStart = UpdatedComponent->GetComponentLocation();
+	MantleElapsed = 0.0f;
+	MantleGravity = GetGravityDirection();
+	MantleSurface = Surface;
+	MantleSurfaceTransform = Surface->GetComponentTransform();
+	CharacterOwner->StopJumping();
+	CharacterOwner->ConsumeMovementInputVector();
+	SetMovementInput(0.0f, 0.0f);
+	StopMovementImmediately();
+	ClearAccumulatedForces();
+	SetMovementMode(MOVE_Custom, MantleMovementMode);
+	return IsMantling();
+}
+
+void USourceCharacterMovementComponent::CancelMantle()
+{
+	if (IsMantling())
+	{
+		StopMovementImmediately();
+		SetMovementMode(MOVE_Falling);
+	}
+}
+
+void USourceCharacterMovementComponent::FinishMantle()
+{
+	StopMovementImmediately();
+	FFindFloorResult Floor;
+	FindFloor(UpdatedComponent->GetComponentLocation(), Floor, false);
+	SetMovementMode(Floor.IsWalkableFloor() ? MOVE_Walking : MOVE_Falling);
+}
+
+void USourceCharacterMovementComponent::PhysCustom(float DeltaTime, int32 Iterations)
+{
+	if (!IsMantling())
+	{
+		Super::PhysCustom(DeltaTime, Iterations);
+		return;
+	}
+	if (!HasValidData() || DeltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+	if (!MantleSurface.IsValid() || !MantleSurface->IsQueryCollisionEnabled()
+		|| !GetGravityDirection().Equals(MantleGravity)
+		|| !MantleSurface->GetComponentTransform().Equals(MantleSurfaceTransform)
+		|| HasAnimRootMotion())
+	{
+		CancelMantle();
+		return;
+	}
+
+	const float Duration = FMath::Max(MantleDuration, 0.1f);
+	const float EndTime = FMath::Min(MantleElapsed + DeltaTime, Duration);
+	while (MantleElapsed < EndTime && IsMantling())
+	{
+		const bool bLifting = MantleElapsed < Duration * 0.55f;
+		const bool bCrossing = !bLifting && MantleElapsed < Duration * 0.9f;
+		const float PhaseStart = bLifting ? 0.0f : (bCrossing ? Duration * 0.55f : Duration * 0.9f);
+		const float PhaseEnd = bLifting ? Duration * 0.55f : (bCrossing ? Duration * 0.9f : Duration);
+		const FVector PhaseFrom = bLifting ? MantleStart : (bCrossing ? MantleLift : MantleAcross);
+		const FVector PhaseTo = bLifting ? MantleLift : (bCrossing ? MantleAcross : MantleTarget);
+		MantleElapsed = FMath::Min(EndTime, PhaseEnd);
+		const float Alpha = FMath::Clamp((MantleElapsed - PhaseStart) / (PhaseEnd - PhaseStart), 0.0f, 1.0f);
+		const float SmoothAlpha = Alpha * Alpha * (3.0f - 2.0f * Alpha);
+		const FVector Target = FMath::Lerp(PhaseFrom, PhaseTo, SmoothAlpha);
+		FHitResult Hit;
+		SafeMoveUpdatedComponent(Target - UpdatedComponent->GetComponentLocation(),
+			UpdatedComponent->GetComponentQuat(), true, Hit);
+		if (!HasValidData() || !IsMantling())
+		{
+			return;
+		}
+		if (Hit.bBlockingHit || !GetGravityDirection().Equals(MantleGravity))
+		{
+			CancelMantle();
+			return;
+		}
+	}
+	Velocity = FVector::ZeroVector;
+	if (IsMantling() && MantleElapsed >= Duration)
+	{
+		FinishMantle();
+	}
+}
+
+void USourceCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode,
+	uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
+	if (PreviousMovementMode == MOVE_Custom && PreviousCustomMode == MantleMovementMode && !IsMantling())
+	{
+		MantleSurface.Reset();
+		MantleElapsed = 0.0f;
+		SetMovementInput(0.0f, 0.0f);
+	}
+}
+
+void USourceCharacterMovementComponent::SetGravityDirection(const FVector& GravityDir)
+{
+	if (!GravityDir.IsNearlyZero() && !GravityDir.GetSafeNormal().Equals(GetGravityDirection()))
+	{
+		CancelMantle();
+	}
+	Super::SetGravityDirection(GravityDir);
+}
+
+void USourceCharacterMovementComponent::OnTeleported()
+{
+	CancelMantle();
+	Super::OnTeleported();
 }
 
 void USourceCharacterMovementComponent::SetMovementInput(float ForwardIn, float SideIn)
@@ -56,12 +405,8 @@ void USourceCharacterMovementComponent::CalcWishDirAndSpeed(FVector& OutWishDir,
 
 	OutWishDir = WishVel.GetSafeNormal();
 
-	OutWishSpeed = WishSpeedScalar * MaxGroundSpeed;
-
-	if (OutWishSpeed > MaxGroundSpeed)
-	{
-		OutWishSpeed = MaxGroundSpeed;
-	}
+	const float SpeedLimit = IsMovingOnGround() && IsCrouching() ? GetMaxSpeed() : MaxGroundSpeed;
+	OutWishSpeed = FMath::Min(WishSpeedScalar * SpeedLimit, SpeedLimit);
 }
 
 void USourceCharacterMovementComponent::AirMove(float DeltaTime)
@@ -121,6 +466,10 @@ void USourceCharacterMovementComponent::WalkMove(float DeltaTime)
 	}
 
 	Accelerate(wishdir, wishSpeed, Sv_Accelerate, DeltaTime);
+	if (IsCrouching())
+	{
+		Velocity = Velocity.GetClampedToMaxSize(GetMaxSpeed());
+	}
 }
 
 void USourceCharacterMovementComponent::Accelerate(FVector wishdir, float wishSpeed, float acceleration,

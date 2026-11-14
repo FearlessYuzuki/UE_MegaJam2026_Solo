@@ -16,8 +16,43 @@ public:
 	bool EnableBunnyhoping = false;
 
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
+	virtual float GetMaxSpeed() const override;
+	virtual void Crouch(bool bClientSimulation = false) override;
+	virtual void UnCrouch(bool bClientSimulation = false) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Move Settings",
+		meta = (ClampMin = "0.0", Units = "cm/s"))
+	float MaxCrouchSpeed = 300.0f;
 
 	void SetMovementInput(float ForwardIn, float SideIn);
+
+	UFUNCTION(BlueprintPure, Category = "Movement|Mantle")
+	bool IsMantling() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Mantle")
+	bool TryStartMantle();
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Mantle")
+	void CancelMantle();
+
+	virtual void SetGravityDirection(const FVector& GravityDir) override;
+	virtual void OnTeleported() override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle",
+		meta = (ClampMin = "0.0", Units = "cm",
+			ToolTip = "Maximum ledge height above the character capsule center, measured opposite gravity."))
+	float MantleMaxHeight = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle",
+		meta = (ClampMin = "1.0", Units = "cm"))
+	float MantleWallDistance = 60.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle",
+		meta = (ClampMin = "0.1", Units = "s"))
+	float MantleDuration = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement|Mantle")
+	bool bDrawMantleDebug = false;
 
 	UFUNCTION(BlueprintPure, Category = "Source Movement|WishVel")
 	FVector CalcWishVel() const;
@@ -33,6 +68,24 @@ public:
 	float GetSideMove() const { return mv_sideMove; }
 
 protected:
+	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
+	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+
+	bool FindMantleTarget(FVector& OutTarget, FVector& OutLift, FVector& OutAcross,
+		UPrimitiveComponent*& OutSurface) const;
+	bool IsMantlePathClear(const FVector& Start, const FVector& End) const;
+	void FinishMantle();
+
+	static constexpr uint8 MantleMovementMode = 1;
+	FVector MantleStart = FVector::ZeroVector;
+	FVector MantleLift = FVector::ZeroVector;
+	FVector MantleAcross = FVector::ZeroVector;
+	FVector MantleTarget = FVector::ZeroVector;
+	FVector MantleGravity = FVector::DownVector;
+	TWeakObjectPtr<UPrimitiveComponent> MantleSurface;
+	FTransform MantleSurfaceTransform;
+	float MantleElapsed = 0.0f;
+
 	UPROPERTY(EditAnywhere, Category = "Move Settings")
 	float Sv_AirAcceleration = 10.0f;
 

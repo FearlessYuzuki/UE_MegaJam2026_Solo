@@ -12,6 +12,11 @@
 #include "MegaJam_2026/Characters/SourceCharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "MegaJam_2026/Rendering/FogViewExtension.h"
+#include "DynamicRHI.h"
+#include "HAL/PlatformMemory.h"
+#include "HAL/PlatformTime.h"
+#include "RenderTimer.h"
+#include "RHIStats.h"
 
 APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USourceCharacterMovementComponent>(
@@ -133,6 +138,7 @@ void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	CancelMantle();
 	SetCameraFlipInputLocked(false);
+	showFramepos(false);
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -142,6 +148,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	UpdateCameraAngle(DeltaTime);
 	UpdateCrouchCamera(DeltaTime);
 	UpdateJumpInput(DeltaTime);
+	showFramepos(bShowFPS);
 	if (SpeedShowingSwitch == true)
 	{
 		ShowVelocity();
@@ -197,6 +204,113 @@ FRotator APlayerCharacter::GetViewRotation() const
 float APlayerCharacter::GetCameraInputDirection() const
 {
 	return CurrentCameraRoll > 90.0f ? -1.0f : 1.0f;
+}
+
+void APlayerCharacter::showFramepos(bool bShouldShowFPS)
+{
+	bShowFPS = bShouldShowFPS;
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	const uint64 MessageKey = 0x4650530000000000ull | static_cast<uint64>(GetUniqueID());
+	if (!GEngine || !bShowFPS || !IsLocallyControlled())
+	{
+		if (GEngine)
+		{
+			GEngine->RemoveOnScreenDebugMessage(MessageKey);
+		}
+		FrameStatsStartTime = 0.0;
+		FrameStatsLastFrameTime = 0.0;
+		FrameStatsPeakFrameTime = 0.0;
+		FrameStatsFrameCount = 0;
+		return;
+	}
+
+	const double CurrentTime = FPlatformTime::Seconds();
+	if (FrameStatsStartTime == 0.0)
+	{
+		FrameStatsStartTime = CurrentTime;
+		FrameStatsLastFrameTime = CurrentTime;
+		return;
+	}
+
+	FrameStatsPeakFrameTime = FMath::Max(FrameStatsPeakFrameTime, CurrentTime - FrameStatsLastFrameTime);
+	FrameStatsLastFrameTime = CurrentTime;
+	++FrameStatsFrameCount;
+	const double SampleDuration = CurrentTime - FrameStatsStartTime;
+	if (SampleDuration < 0.25)
+	{
+		return;
+	}
+
+	const double FramesPerSecond = FrameStatsFrameCount / SampleDuration;
+	const double FrameMilliseconds = SampleDuration * 1000.0 / FrameStatsFrameCount;
+	const FPlatformMemoryStats MemoryStats = FPlatformMemory::GetStats();
+	constexpr double BytesPerMiB = 1024.0 * 1024.0;
+	const double SystemUsedMemory = static_cast<double>(MemoryStats.TotalPhysical)
+		- static_cast<double>(MemoryStats.AvailablePhysical);
+	FString StatsText = FString::Printf(
+		TEXT("FPS: %.1f | Frame avg: %.2f ms | Peak (sample): %.2f ms\n")
+		TEXT("CPU Game: %.2f ms | Render: %.2f ms | RHI: %.2f ms (latest)\n")
+		TEXT("Process RAM: %.0f MiB | Peak: %.0f MiB | Commit/virtual: %.0f MiB\n")
+		TEXT("System RAM used/total: %.0f / %.0f MiB | Available: %.0f MiB\n"),
+		FramesPerSecond, FrameMilliseconds, FrameStatsPeakFrameTime * 1000.0,
+		FPlatformTime::ToMilliseconds(GGameThreadTime),
+		FPlatformTime::ToMilliseconds(GRenderThreadTime),
+		FPlatformTime::ToMilliseconds(GRHIThreadTime),
+		MemoryStats.UsedPhysical / BytesPerMiB, MemoryStats.PeakUsedPhysical / BytesPerMiB,
+		MemoryStats.UsedVirtual / BytesPerMiB, SystemUsedMemory / BytesPerMiB,
+		MemoryStats.TotalPhysical / BytesPerMiB, MemoryStats.AvailablePhysical / BytesPerMiB);
+
+	if (GDynamicRHI)
+	{
+		const uint32 GPUFrameCycles = RHIGetGPUFrameCycles();
+		StatsText += GPUFrameCycles > 0
+			? FString::Printf(TEXT("GPU: %.2f ms (latest)\n"), FPlatformTime::ToMilliseconds(GPUFrameCycles))
+			: TEXT("GPU: N/A (timing unavailable)\n");
+
+		FRHIMemoryStats VideoMemoryStats;
+		RHIGetMemoryStats(VideoMemoryStats);
+		if (VideoMemoryStats.BudgetLocal > 0)
+		{
+			StatsText += FString::Printf(
+				TEXT("Process VRAM used/budget: %.0f / %.0f MiB%s\n"),
+				VideoMemoryStats.UsedLocal / BytesPerMiB, VideoMemoryStats.BudgetLocal / BytesPerMiB,
+				VideoMemoryStats.UsedLocal > VideoMemoryStats.BudgetLocal ? TEXT(" [OVER BUDGET]") : TEXT(""));
+		}
+		else
+		{
+			StatsText += TEXT("Process VRAM used/budget: N/A (RHI unsupported)\n");
+		}
+		if (VideoMemoryStats.BudgetSystem > 0)
+		{
+			StatsText += FString::Printf(TEXT("GPU system/shared used/budget: %.0f / %.0f MiB\n"),
+				VideoMemoryStats.UsedSystem / BytesPerMiB, VideoMemoryStats.BudgetSystem / BytesPerMiB);
+		}
+
+		FTextureMemoryStats TextureMemoryStats;
+		RHIGetTextureMemoryStats(TextureMemoryStats);
+		if (TextureMemoryStats.DedicatedVideoMemory > 0)
+		{
+			StatsText += FString::Printf(TEXT("Dedicated VRAM capacity: %.0f MiB\n"),
+				TextureMemoryStats.DedicatedVideoMemory / BytesPerMiB);
+		}
+		StatsText += FString::Printf(TEXT("Textures streaming/non-streaming: %.0f / %.0f MiB | Pool budget: %.0f MiB\n"),
+			TextureMemoryStats.StreamingMemorySize / BytesPerMiB,
+			TextureMemoryStats.NonStreamingMemorySize / BytesPerMiB,
+			TextureMemoryStats.TexturePoolSize / BytesPerMiB);
+	}
+	else
+	{
+		StatsText += TEXT("GPU / VRAM: N/A (no RHI)\n");
+	}
+
+	StatsText += GIsEditor
+		? TEXT("PIE: memory and renderer stats include the editor process; threads overlap.")
+		: TEXT("Memory is process-wide; CPU/GPU stages overlap, do not add their times.");
+	GEngine->AddOnScreenDebugMessage(MessageKey, 2.0f, FColor::Cyan, StatsText, false);
+	FrameStatsStartTime = CurrentTime;
+	FrameStatsPeakFrameTime = 0.0;
+	FrameStatsFrameCount = 0;
+#endif
 }
 
 void APlayerCharacter::SetCameraAngle()

@@ -165,4 +165,17 @@ private:
 	float TargetCameraRoll = 0.0f;
 
 	float CameraFlipElapsed = 0.0f;
+
+public:
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "ShowFPS|Tools")
+	bool bShowFPS = true;
+
+	UFUNCTION(BlueprintCallable, Category = "ShowFPS|Tools")
+	void showFramepos(bool bShouldShowFPS);
+
+private:
+	double FrameStatsStartTime = 0.0;
+	double FrameStatsLastFrameTime = 0.0;
+	double FrameStatsPeakFrameTime = 0.0;
+	uint32 FrameStatsFrameCount = 0;
 };

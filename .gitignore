@@ -89,12 +89,20 @@ Thumbs.db
 # ── 第三方素材：全部排除，只跟踪自研内容 ──
 # 本工程的第三方素材来自外部平台（非 Fab），合计约 7.9 GB，
 # 单文件最大 406 MB，远超 GitHub 100 MB 上限，因此整体不入库。
-# 做法：Content 下只白名单放行 MegaJam2026/，其余一律忽略，
-# 以后往 Content 里导入任何新素材包都不用再改这里。
+# 做法：Content 下仅放行 MegaJam2026/ 自研内容和下方显式列出的运行时视频，
+# 其余一律忽略；新素材包默认不入库。
 # 自研内容请放在 Content/MegaJam2026/ 下；确有需要新增自研顶层目录时，
 # 在下面按 !/Content/XXX/ 补一行白名单即可。
 /Content/*
 !/Content/MegaJam2026/
+
+# 菜单运行时引用的视频；其他 Movies 文件仍默认忽略
+!/Content/Movies/
+/Content/Movies/*
+!/Content/Movies/Loop_Intro_1080p60_Foreground_v02.mp4
+
+# UMG Widget Preview 编辑器预览配置，不是运行时菜单资源
+/Content/MegaJam2026/UI/Previews/
 
 # 已知第三方包（上面规则已覆盖，此处显式列出便于查阅）
 /Content/Advanced_Water_Material/

@@ -6,14 +6,16 @@
 
 ## Visibility
 
-- `mj.FogViewDistance` is the perspective far clipping plane in centimeters. The default is `18000` (180 m), less than the approximately 190 m from either water surface to the nearest middle fog card.
+- `mj.FogViewDistance` is the perspective far clipping plane in centimeters. The default is `25000` (250 m).
 - `mj.FogViewDistance 0` disables the override for comparison.
 - The finite reversed-Z projection updates both clipping and the view frustum. The limit is forward camera-space depth, not a spherical streaming radius.
 - This limits the main player view, not actor ticking, physics, streaming, shadow rendering, or all Lumen work. Large intersecting primitives can still be submitted.
 
 ## Surrounding mist
 
-`HeightFog_Subtle` uses analytic Exponential Height Fog rather than the previously enabled 500 m volumetric fog. It starts 2 m from the camera, uses nearly uniform height density (`0.22`, height falloff `0.00001`), and stops integrating at 180 m. RGB fog luminance is neutral `(1000, 1000, 1000)` to match the level fixed exposure EV100 11.5; normalized low values appeared black at this exposure. The four low-density EasyFog cards remain as the middle band.
+`HeightFog_Subtle` uses analytic Exponential Height Fog rather than the previously enabled 500 m volumetric fog. It starts 2 m from the camera, uses nearly uniform height density (`0.495`, increased by 50% from `0.33`, height falloff `0.00001`), and stops integrating at 250 m. RGB fog luminance is neutral `(1000, 1000, 1000)`. The fixed exposure is EV100 11.5 with exposure compensation -1 EV.
+
+The four middle EasyFog cards have the `TransitFog` actor tag. The view extension always adds their primitive components to `HiddenPrimitives` for tagged perspective game views, including during gravity transitions. This is independent of `mj.FogViewDistance`, so disabling the far clip override does not reveal the cards. Editor views and scene/reflection captures are unchanged. The actors and materials remain in the level, and their zero tick-rate configuration is preserved; this is view-specific hiding, not removal or a guarantee of zero indirect rendering cost. Tagged actors are collected when the extension first encounters a world; dynamic spawning or retagging after that requires a world reload.
 
 The analytic distance fog obscures the approach to the clipping plane; it does not replace the actual projection limit. If the clip distance changes, retune the fog integration distance and density together.
 
@@ -23,4 +25,4 @@ At BeginPlay the first-person camera overrides Motion Blur Amount to `0.15`, Max
 
 ## Validation
 
-The Win64 Development Editor build succeeded and hot reloaded. In PIE, with fog temporarily disabled, an 80 m test cube remained visible and a 220 m test cube disappeared at the default clip distance. Setting the console variable to zero restored both cubes. The console variable was restored to 18000, PIE was stopped, and both temporary test actors were removed. Camera post-process values were read back in PIE. FPS improvement and fast-turn motion blur comfort have not been benchmarked.
+Earlier 80 m / 220 m cube observations were inconclusive and are not evidence that the final far clip works correctly. Prior PIE logs confirmed that the extension was applied, and camera post-process settings were read back. The current 250 m clip and unconditional `TransitFog` game-view hiding still require final in-game visual validation, including looking upward and traversing the middle band. No FPS improvement is claimed.

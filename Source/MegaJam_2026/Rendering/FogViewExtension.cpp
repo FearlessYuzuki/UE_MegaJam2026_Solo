@@ -1,5 +1,7 @@
 #include "MegaJam_2026/Rendering/FogViewExtension.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/WorldSettings.h"
 #include "HAL/IConsoleManager.h"
 #include "SceneInterface.h"
@@ -10,7 +12,7 @@ namespace
 {
 	TAutoConsoleVariable<float> FogViewDistance(
 		TEXT("mj.FogViewDistance"),
-		18000.0f,
+		25000.0f,
 		TEXT("Perspective far clip distance in cm for worlds tagged LimitedFogView. 0 disables clipping."));
 
 	class FFogViewExtension final : public FSceneViewExtensionBase
@@ -23,13 +25,45 @@ namespace
 
 		virtual void SetupView(FSceneViewFamily& ViewFamily, FSceneView& View) override
 		{
-			const UWorld* World = ViewFamily.Scene ? ViewFamily.Scene->GetWorld() : nullptr;
+			UWorld* World = ViewFamily.Scene ? ViewFamily.Scene->GetWorld() : nullptr;
 			const AWorldSettings* WorldSettings = World ? World->GetWorldSettings() : nullptr;
-			const float FarDistance = FogViewDistance.GetValueOnGameThread();
 			if (!View.bIsGameView || View.bIsSceneCapture || View.bIsReflectionCapture
 				|| !View.IsPerspectiveProjection()
-				|| !WorldSettings || !WorldSettings->ActorHasTag(TEXT("LimitedFogView"))
-				|| !FMath::IsFinite(FarDistance) || FarDistance <= 0.0f)
+				|| !WorldSettings || !WorldSettings->ActorHasTag(TEXT("LimitedFogView")))
+			{
+				return;
+			}
+
+			if (CachedWorld.Get() != World)
+			{
+				CachedWorld = World;
+				TransitFogActors.Reset();
+				for (TActorIterator<AActor> ActorIterator(World); ActorIterator; ++ActorIterator)
+				{
+					if (ActorIterator->ActorHasTag(TEXT("TransitFog")))
+					{
+						TransitFogActors.Add(*ActorIterator);
+					}
+				}
+			}
+
+			for (const TWeakObjectPtr<AActor>& FogReference : TransitFogActors)
+			{
+				const AActor* FogActor = FogReference.Get();
+				if (!FogActor)
+				{
+					continue;
+				}
+				TInlineComponentArray<UPrimitiveComponent*> FogComponents;
+				FogActor->GetComponents(FogComponents);
+				for (const UPrimitiveComponent* FogComponent : FogComponents)
+				{
+					View.HiddenPrimitives.Add(FogComponent->GetPrimitiveSceneId());
+				}
+			}
+
+			const float FarDistance = FogViewDistance.GetValueOnGameThread();
+			if (!FMath::IsFinite(FarDistance) || FarDistance <= 0.0f)
 			{
 				return;
 			}
@@ -52,6 +86,10 @@ namespace
 			}
 			View.UpdateProjectionMatrix(Projection);
 		}
+
+	private:
+		TWeakObjectPtr<UWorld> CachedWorld;
+		TArray<TWeakObjectPtr<AActor>> TransitFogActors;
 	};
 }
 

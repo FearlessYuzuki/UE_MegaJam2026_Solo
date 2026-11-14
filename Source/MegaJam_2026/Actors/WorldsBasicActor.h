@@ -42,6 +42,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	virtual bool ShouldFlipPlayerOnOverlap() const;
+
 	UFUNCTION()
 	void OnTriggerBoxBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	                              UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep,

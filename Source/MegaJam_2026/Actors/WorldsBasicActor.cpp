@@ -123,7 +123,12 @@ void AWorldsBasicActor::OnTriggerBoxBeginOverlap(UPrimitiveComponent* Overlapped
 
 	BP_OnPlayerEntered(Pawn, FootBlock);
 	OnPlayerOverlapChanged.Broadcast(Pawn, true);
-	
+
+	if (!ShouldFlipPlayerOnOverlap())
+	{
+		return;
+	}
+
 	UCharacterMovementComponent* MovementComponent = Cast<UCharacterMovementComponent>(Pawn->GetMovementComponent());
 	APlayerCharacter* Player = Cast<APlayerCharacter>(Pawn);
 	if (MovementComponent && Player)
@@ -131,6 +136,11 @@ void AWorldsBasicActor::OnTriggerBoxBeginOverlap(UPrimitiveComponent* Overlapped
 		MovementComponent->SetGravityDirection(-MovementComponent->GetGravityDirection());
 		Player->SetCameraAngle();
 	}
+}
+
+bool AWorldsBasicActor::ShouldFlipPlayerOnOverlap() const
+{
+	return true;
 }
 
 void AWorldsBasicActor::OnTriggerBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

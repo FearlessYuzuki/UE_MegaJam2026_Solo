@@ -43,7 +43,7 @@ protected:
 	float MaxGroundSpeed = 600.f;
 
 	UPROPERTY(EditAnywhere, Category = "Move Settings")
-	float Sv_Friction = 5.f;
+	float Sv_Friction =12.f;
 
 	UPROPERTY(EditAnywhere, Category = "Move Settings")
 	float Sv_Accelerate = 12.f;

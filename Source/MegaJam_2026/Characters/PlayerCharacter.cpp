@@ -4,6 +4,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/InputComponent.h"
 #include "InputActionValue.h"
 #include "Engine/Engine.h"
@@ -16,6 +17,7 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 		ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = true;
+	GetCapsuleComponent()->SetCapsuleHalfHeight(160.0f, false);
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(FName("FirstPersonCamera"));
 	FirstPersonSpringArm = CreateDefaultSubobject<USpringArmComponent>(FName("FirstPersonSpringArm"));
@@ -23,11 +25,10 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	FirstPersonSpringArm->SetupAttachment(RootComponent);
 	FirstPersonCamera->SetupAttachment(FirstPersonSpringArm, USpringArmComponent::SocketName);
 
-	FirstPersonSpringArm->TargetArmLength = 111.f;
-	FirstPersonCamera->FieldOfView = 103.f;
+	CenterFirstPersonCamera();
+	FirstPersonCamera->FieldOfView = 118.0f;
 	FirstPersonSpringArm->bUsePawnControlRotation = false;
 	FirstPersonCamera->bUsePawnControlRotation = true;
-	FirstPersonSpringArm->SocketOffset = FVector(155.0f, 0.0f, 54.0f);
 
 	DebugCamera = CreateDefaultSubobject<UCameraComponent>(FName("DebugCamCamera"));
 	DebugSpringArm = CreateDefaultSubobject<USpringArmComponent>(FName("Debug Spring Arm"));
@@ -53,11 +54,33 @@ APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	CenterFirstPersonCamera();
+}
+
+void APlayerCharacter::CenterFirstPersonCamera()
+{
+	if (!FirstPersonSpringArm || !FirstPersonCamera)
+	{
+		return;
+	}
+
+	FirstPersonSpringArm->TargetArmLength = 0.0f;
+	FirstPersonSpringArm->SocketOffset = FVector::ZeroVector;
+	FirstPersonSpringArm->TargetOffset = FVector::ZeroVector;
+	FirstPersonSpringArm->SetRelativeLocation(FVector::ZeroVector);
+	FirstPersonCamera->SetRelativeLocation(FVector::ZeroVector);
+}
+
+void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	SetCameraFlipInputLocked(false);
+	Super::EndPlay(EndPlayReason);
 }
 
 void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	UpdateCameraAngle(DeltaTime);
 	if (SpeedShowingSwitch == true)
 	{
 		ShowVelocity();
@@ -92,7 +115,8 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 		EnhancedInputComponent->BindAction(CrouchAction,ETriggerEvent::Completed,this,&APlayerCharacter::DoUnCrouch);
 		
 		EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Canceled, this,&APlayerCharacter::DoUnCrouch);
-
+		
+		
 		if (AutoBhopFunction)
 		{
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Triggered, this,
@@ -110,8 +134,106 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	}
 }
 
+FRotator APlayerCharacter::GetViewRotation() const
+{
+	FRotator ViewRotation = Super::GetViewRotation();
+	ViewRotation.Roll = CurrentCameraRoll;
+	return ViewRotation;
+}
+
+float APlayerCharacter::GetCameraInputDirection() const
+{
+	return CurrentCameraRoll > 90.0f ? -1.0f : 1.0f;
+}
+
+void APlayerCharacter::SetCameraAngle()
+{
+	if (!FirstPersonCamera)
+	{
+		return;
+	}
+
+	SetCameraFlipInputLocked(true);
+	if (AController* InputController = GetController())
+	{
+		InputController->SetControlRotation(FRotator(0.0f, InputController->GetControlRotation().Yaw, 0.0f));
+		if (APlayerController* PlayerController = Cast<APlayerController>(InputController))
+		{
+			PlayerController->RotationInput = FRotator::ZeroRotator;
+		}
+	}
+
+	ClearSourceMovementInput();
+	ConsumeMovementInputVector();
+	StopJumping();
+	GetCharacterMovement()->StopMovementImmediately();
+
+	StartCameraRoll = CurrentCameraRoll;
+	TargetCameraRoll = GetCharacterMovement()->GetGravityDirection().Z > 0.0f ? 180.0f : 0.0f;
+	CameraFlipElapsed = 0.0f;
+	UpdateCameraAngle(0.0f);
+}
+
+void APlayerCharacter::SetCameraFlipInputLocked(bool bLocked)
+{
+	if (bIsCameraFlipping == bLocked)
+	{
+		return;
+	}
+
+	bIsCameraFlipping = bLocked;
+	if (bLocked)
+	{
+		CameraFlipInputController = GetController();
+	}
+
+	if (AController* InputController = CameraFlipInputController.Get())
+	{
+		InputController->SetIgnoreLookInput(bLocked);
+		InputController->SetIgnoreMoveInput(bLocked);
+	}
+
+	if (!bLocked)
+	{
+		CameraFlipInputController.Reset();
+	}
+}
+
+void APlayerCharacter::UpdateCameraAngle(float DeltaTime)
+{
+	if (!bIsCameraFlipping)
+	{
+		return;
+	}
+
+	if (!FirstPersonCamera || CurrentCameraRoll == TargetCameraRoll)
+	{
+		SetCameraFlipInputLocked(false);
+		return;
+	}
+
+	CameraFlipElapsed += DeltaTime;
+	const float Alpha = CameraFlipDuration > 0.0f
+		? FMath::Clamp(CameraFlipElapsed / CameraFlipDuration, 0.0f, 1.0f)
+		: 1.0f;
+	const float SmoothAlpha = Alpha * Alpha * (3.0f - 2.0f * Alpha);
+	CurrentCameraRoll = Alpha >= 1.0f
+		? TargetCameraRoll
+		: FMath::Lerp(StartCameraRoll, TargetCameraRoll, SmoothAlpha);
+	if (Alpha >= 1.0f)
+	{
+		SetCameraFlipInputLocked(false);
+	}
+}
+
 void APlayerCharacter::MoveInput(const FInputActionValue& Value)
 {
+	if (bIsCameraFlipping || IsMoveInputIgnored())
+	{
+		ClearSourceMovementInput();
+		return;
+	}
+
 	if (bDevMode)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 0.0f, FColor::Green, "Input Detctive");
@@ -121,7 +243,7 @@ void APlayerCharacter::MoveInput(const FInputActionValue& Value)
 
 	if (USourceCharacterMovementComponent* SourceMove = Cast<USourceCharacterMovementComponent>(GetCharacterMovement()))
 	{
-		SourceMove->SetMovementInput(Vector2D.Y, Vector2D.X);
+		SourceMove->SetMovementInput(Vector2D.Y, Vector2D.X * GetCameraInputDirection());
 	}
 }
 
@@ -151,24 +273,30 @@ void APlayerCharacter::MouseLookInput(const FInputActionValue& Value)
 
 void APlayerCharacter::Domove(float right, float left)
 {
-	if (GetController())
+	if (!bIsCameraFlipping && GetController())
 	{
-		AddMovementInput(GetActorRightVector(), right);
+		AddMovementInput(GetActorRightVector(), right * GetCameraInputDirection());
 		AddMovementInput(GetActorForwardVector(), left);
 	}
 }
 
 void APlayerCharacter::DoLook(float Yaw, float Pitch)
 {
-	if (GetController())
+	if (!bIsCameraFlipping && GetController())
 	{
-		AddControllerYawInput(Yaw);
-		AddControllerPitchInput(Pitch);
+		const float InputDirection = GetCameraInputDirection();
+		AddControllerYawInput(Yaw * InputDirection);
+		AddControllerPitchInput(Pitch * InputDirection);
 	}
 }
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 void APlayerCharacter::DoJumpStart()
 {
+	if (bIsCameraFlipping || IsMoveInputIgnored())
+	{
+		return;
+	}
+
 	Jump();
 }
 
@@ -179,6 +307,11 @@ void APlayerCharacter::DoJumpEnd()
 
 void APlayerCharacter::DoCrouch()
 {
+	if (bIsCameraFlipping || IsMoveInputIgnored())
+	{
+		return;
+	}
+
 	Crouch();
 }
 
@@ -239,8 +372,26 @@ void APlayerCharacter::Respawn()
 	UE_LOG(LogTemp, Warning, TEXT("[Player] Respawn() -> %s @ %s"),
 	       *GetNameSafe(TargetSP), *TargetSP->GetActorLocation().ToString());
 
+	SetCameraFlipInputLocked(false);
+	ClearSourceMovementInput();
+	ConsumeMovementInputVector();
+	StopJumping();
+	CurrentCameraRoll = 0.0f;
+	StartCameraRoll = 0.0f;
+	TargetCameraRoll = 0.0f;
+	CameraFlipElapsed = 0.0f;
+
 	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->SetGravityDirection(FVector::DownVector);
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	if (AController* InputController = GetController())
+	{
+		InputController->SetControlRotation(FRotator(0.0f, TargetSP->GetActorRotation().Yaw, 0.0f));
+		if (APlayerController* PlayerController = Cast<APlayerController>(InputController))
+		{
+			PlayerController->RotationInput = FRotator::ZeroRotator;
+		}
+	}
 	SetActorLocationAndRotation(TargetSP->GetActorLocation(), TargetSP->GetActorRotation(), false, nullptr,
 	                            ETeleportType::TeleportPhysics);
 }

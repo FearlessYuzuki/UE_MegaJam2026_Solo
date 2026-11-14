@@ -34,6 +34,8 @@ public:
 	virtual void SwitchToThirdCam();*/
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual FRotator GetViewRotation() const override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tools|DevMode")
 	bool bDevMode = false;
@@ -104,4 +106,35 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	
+	UFUNCTION(BlueprintCallable, Category = "Camera|Gravity")
+	void SetCameraAngle();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Gravity",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float CameraFlipDuration = 1.5f;
+
+private:
+	void CenterFirstPersonCamera();
+	void UpdateCameraAngle(float DeltaTime);
+	void SetCameraFlipInputLocked(bool bLocked);
+	float GetCameraInputDirection() const;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Camera|Gravity",
+		meta = (AllowPrivateAccess = "true"))
+	bool bIsCameraFlipping = false;
+
+	TWeakObjectPtr<AController> CameraFlipInputController;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Camera|Gravity",
+		meta = (AllowPrivateAccess = "true"))
+	float CurrentCameraRoll = 0.0f;
+
+	float StartCameraRoll = 0.0f;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Camera|Gravity",
+		meta = (AllowPrivateAccess = "true"))
+	float TargetCameraRoll = 0.0f;
+
+	float CameraFlipElapsed = 0.0f;
 };

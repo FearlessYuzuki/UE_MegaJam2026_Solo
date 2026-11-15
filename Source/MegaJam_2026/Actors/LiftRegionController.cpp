@@ -51,3 +51,8 @@ void ALiftRegionController::RequestLift()
 		*LiftRegionTag.ToString(), GetWorld()->GetTimeSeconds());
 	OnLiftRequested.Broadcast();
 }
+
+void ALiftRegionController::RestoreSavedState()
+{
+	if (bHasTriggered) GetWorldTimerManager().ClearTimer(AutoStartTimer);
+}

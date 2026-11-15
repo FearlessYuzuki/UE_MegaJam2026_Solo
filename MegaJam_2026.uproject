@@ -23,27 +23,33 @@
 		},
 		{
 			"Name": "AllToolsets",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		},
 		{
 			"Name": "ChaosClothAssetToolset",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		},
 		{
 			"Name": "LiveCodingToolset",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		},
 		{
 			"Name": "MVVMToolset",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		},
 		{
 			"Name": "MCPClientToolset",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		},
 		{
 			"Name": "ModelContextProtocol",
-			"Enabled": true
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
 		}
 	]
 }

@@ -17,12 +17,17 @@
 #include "HAL/PlatformTime.h"
 #include "RenderTimer.h"
 #include "RHIStats.h"
+#include "MegaJam_2026/Settings/LoopSettings.h"
+#include "MegaJam_2026/Audio/FootstepAudioComponent.h"
+#include "Core/LoopSaveGame.h"
+#include "EngineUtils.h"
 
 APlayerCharacter::APlayerCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<USourceCharacterMovementComponent>(
 		ACharacter::CharacterMovementComponentName))
 {
 	PrimaryActorTick.bCanEverTick = true;
+	FootstepAudio = CreateDefaultSubobject<UFootstepAudioComponent>(TEXT("FootstepAudio"));
 	GetCapsuleComponent()->SetCapsuleHalfHeight(160.0f, false);
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(FName("FirstPersonCamera"));
@@ -75,6 +80,15 @@ void APlayerCharacter::BeginPlay()
 		FirstPersonCamera->PostProcessSettings.MotionBlurMax = 1.0f;
 		FirstPersonCamera->PostProcessSettings.bOverride_MotionBlurTargetFPS = true;
 		FirstPersonCamera->PostProcessSettings.MotionBlurTargetFPS = 60;
+	}
+}
+
+void APlayerCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+	if (FootstepAudio)
+	{
+		FootstepAudio->PlayJumpSound();
 	}
 }
 
@@ -455,8 +469,9 @@ void APlayerCharacter::DoLook(float Yaw, float Pitch)
 	if (!bIsCameraFlipping && GetController())
 	{
 		const float InputDirection = GetCameraInputDirection();
-		AddControllerYawInput(Yaw * InputDirection);
-		AddControllerPitchInput(Pitch * InputDirection);
+		const float Sensitivity = ULoopSettings::GetLoopSettings()->GetMouseSensitivityMultiplier();
+		AddControllerYawInput(Yaw * InputDirection * Sensitivity);
+		AddControllerPitchInput(Pitch * InputDirection * Sensitivity);
 	}
 }
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
@@ -641,6 +656,48 @@ void APlayerCharacter::SetSpawnPoint(AActor* InPoint)
 		                                 FString::Printf(TEXT("[Player] RespawnPoint Updated: %s @ %s"),
 		                                                 *InPoint->GetName(),
 		                                                 *InPoint->GetActorLocation().ToString()));
+	}
+}
+
+void APlayerCharacter::PrepareForMenu()
+{
+	ClearSourceMovementInput();
+	ConsumeMovementInputVector();
+	StopJumping();
+	ResetJumpInputState();
+}
+
+FName APlayerCharacter::GetSavedSpawnPoint() const
+{
+	return IsValid(CurrentSpawnPoint) ? CurrentSpawnPoint->GetFName() : NAME_None;
+}
+
+void APlayerCharacter::RestoreSavedPlayer(const ULoopSaveGame& Save)
+{
+	SetCameraFlipInputLocked(false);
+	CancelMantle();
+	PrepareForMenu();
+	ResetCrouchCamera();
+	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->SetGravityDirection(Save.Gravity.GetSafeNormal());
+	SetActorTransform(Save.PlayerTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	CurrentCameraRoll = Save.Gravity.Z > 0 ? 180.0f : 0.0f;
+	StartCameraRoll = CurrentCameraRoll;
+	TargetCameraRoll = CurrentCameraRoll;
+	CameraFlipElapsed = 0;
+	if (Save.bCrouched) Crouch();
+	else UnCrouch();
+	GetCharacterMovement()->SetMovementMode(static_cast<EMovementMode>(Save.MovementMode));
+	GetCharacterMovement()->Velocity = Save.Velocity;
+	if (GetController()) GetController()->SetControlRotation(Save.ControlRotation);
+	CurrentSpawnPoint = nullptr;
+	for (TActorIterator<AActor> Actor(GetWorld()); Actor; ++Actor)
+	{
+		if (Actor->GetFName() == Save.SpawnPoint)
+		{
+			CurrentSpawnPoint = *Actor;
+			break;
+		}
 	}
 }
 

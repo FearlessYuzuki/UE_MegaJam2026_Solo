@@ -5,6 +5,8 @@
 #include "MyPlayerController.generated.h"
 
 class UInputMappingContext;
+class ULoopMainMenuWidget;
+class ULoopPauseMenuWidget;
 
 UCLASS(abstract, config = "Game")
 class MEGAJAM_2026_API AMyPlayerController : public APlayerController
@@ -13,6 +15,11 @@ class MEGAJAM_2026_API AMyPlayerController : public APlayerController
 
 public:
 	AMyPlayerController();
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Menus")
+	TSubclassOf<ULoopMainMenuWidget> MainMenuClass;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Menus")
+	TSubclassOf<ULoopPauseMenuWidget> PauseMenuClass;
+	UFUNCTION(BlueprintCallable, Category="Menus") void TogglePauseMenu();
 
 protected:
 	UPROPERTY(EditAnywhere, category="Input|Input Mappings")

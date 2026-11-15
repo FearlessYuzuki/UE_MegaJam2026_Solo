@@ -7,6 +7,8 @@
 #include "SceneInterface.h"
 #include "SceneView.h"
 #include "SceneViewExtension.h"
+#include "GameFramework/PlayerController.h"
+#include "Rendering/LoopWorldColorSubsystem.h"
 
 namespace
 {
@@ -62,6 +64,10 @@ namespace
 				}
 			}
 
+			const APlayerController* Controller = World->GetFirstPlayerController();
+			const ULoopWorldColorSubsystem* Color = World->GetSubsystem<ULoopWorldColorSubsystem>();
+			if ((Controller && Controller->GetViewTarget() && Controller->GetViewTarget()->ActorHasTag(TEXT("RingOverview")))
+				|| (Color && Color->IsWorldColorRestored())) return;
 			const float FarDistance = FogViewDistance.GetValueOnGameThread();
 			if (!FMath::IsFinite(FarDistance) || FarDistance <= 0.0f)
 			{

@@ -13,7 +13,9 @@
 
 ## Surrounding mist
 
-`HeightFog_Subtle` uses analytic Exponential Height Fog rather than the previously enabled 500 m volumetric fog. It starts 2 m from the camera, uses nearly uniform height density (`0.495`, increased by 50% from `0.33`, height falloff `0.00001`), and stops integrating at 250 m. RGB fog luminance is neutral `(1000, 1000, 1000)`. The fixed exposure is EV100 11.5 with exposure compensation -1 EV.
+`HeightFog_Subtle` uses analytic Exponential Height Fog rather than the previously enabled 500 m volumetric fog. In `L_Tutorial` it starts 1 m from the camera and uses nearly uniform height density (`0.8`, height falloff `0.00001`); the player view retains its 250 m far clip. RGB fog luminance is neutral `(600, 600, 600)`. The fixed exposure remains EV100 11.5 with tutorial exposure compensation -1.5 EV; both directional lights are 10000 lux and the skylight fill is 0.8 for the darker teaching presentation.
+
+The tutorial `PlayerStart_TutorialCenter` is saved at `(0, 0, 0)`, the midpoint between the lower and upper world surfaces. The pawn therefore begins suspended in the central gap and falls under the active gravity direction when play starts.
 
 The four middle EasyFog cards have the `TransitFog` actor tag. The view extension always adds their primitive components to `HiddenPrimitives` for tagged perspective game views, including during gravity transitions. This is independent of `mj.FogViewDistance`, so disabling the far clip override does not reveal the cards. Editor views and scene/reflection captures are unchanged. The actors and materials remain in the level, and their zero tick-rate configuration is preserved; this is view-specific hiding, not removal or a guarantee of zero indirect rendering cost. Tagged actors are collected when the extension first encounters a world; dynamic spawning or retagging after that requires a world reload.
 

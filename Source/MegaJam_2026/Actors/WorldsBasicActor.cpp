@@ -1,4 +1,5 @@
 #include "WorldsBasicActor.h"
+#include "Actors/BlockCenterMarkerComponent.h"
 
 #include "Characters/PlayerCharacter.h"
 #include "Engine/Engine.h"
@@ -37,6 +38,8 @@ AWorldsBasicActor::AWorldsBasicActor()
 	}
 	TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &AWorldsBasicActor::OnTriggerBoxBeginOverlap);
 	TriggerBox->OnComponentEndOverlap.AddDynamic(this, &AWorldsBasicActor::OnTriggerBoxEndOverlap);
+	CenterMarker = CreateDefaultSubobject<UBlockCenterMarkerComponent>(TEXT("CenterMarker"));
+	CenterMarker->SetupAttachment(BaseBox);
 
 	RefreshBaseShape();
 }
@@ -50,6 +53,11 @@ void AWorldsBasicActor::OnConstruction(const FTransform& Transform)
 	if (IdleMaterial && BaseBox)
 	{
 		BaseBox->SetMaterial(MaterialSlot, IdleMaterial);
+	}
+	if (BaseBox)
+	{
+		BaseBox->SetRenderCustomDepth(false);
+		BaseBox->SetCustomDepthStencilValue(0);
 	}
 }
 
@@ -79,6 +87,7 @@ void AWorldsBasicActor::RefreshBaseShape()
 		TriggerBox->SetRelativeLocation(FVector(0.0f, 0.0f,
 			BaseMesh->GetBoundingBox().Max.Z + TriggerHeightOffset));
 	}
+	if (CenterMarker) CenterMarker->RefreshForSurface(BaseBox);
 }
 
 void AWorldsBasicActor::BeginPlay()
@@ -90,6 +99,11 @@ void AWorldsBasicActor::BeginPlay()
 	if (IdleMaterial && BaseBox)
 	{
 		BaseBox->SetMaterial(MaterialSlot, IdleMaterial);
+	}
+	if (BaseBox)
+	{
+		BaseBox->SetRenderCustomDepth(false);
+		BaseBox->SetCustomDepthStencilValue(0);
 	}
 }
 

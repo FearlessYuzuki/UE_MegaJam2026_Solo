@@ -10,6 +10,8 @@
 class UInputComponent;
 class USkeletalMeshComponent;
 class UInputAction;
+class UFootstepAudioComponent;
+class ULoopSaveGame;
 struct FInputActionValue;
 
 UCLASS()
@@ -30,12 +32,20 @@ class MEGAJAM_2026_API APlayerCharacter : public ACharacter
 	TObjectPtr<USpringArmComponent> DebugSpringArm;
 
 public:
+	void PrepareForMenu();
+	void RestoreSavedPlayer(const ULoopSaveGame& Save);
+	FName GetSavedSpawnPoint() const;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UFootstepAudioComponent> FootstepAudio;
+
 	/*virtual void SwitchToFirstCam();
 	virtual void SwitchToThirdCam();*/
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual FRotator GetViewRotation() const override;
+	virtual void OnJumped_Implementation() override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tools|DevMode")
 	bool bDevMode = false;

@@ -8,6 +8,7 @@
 
 class APawn;
 class UMaterialInterface;
+class UBlockCenterMarkerComponent;
 
 /** 玩家进入/离开触发盒时广播，bEntered = true 表示进入。 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWorldsBasicPlayerOverlap, AActor*, PlayerActor,
@@ -145,6 +146,9 @@ private:
 
 	UPROPERTY(EditAnywhere, Category = "Components")
 	TObjectPtr<UBoxComponent> TriggerBox;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UBlockCenterMarkerComponent> CenterMarker;
 
 	/** 当前处于触发盒内的玩家，以及各个玩家脚下的方块。 */
 	TSet<TWeakObjectPtr<APawn>> OverlappingPawns;
